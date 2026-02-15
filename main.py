@@ -1,10 +1,11 @@
 import argparse
 import os
 
-from call_function import available_functions
 from dotenv import load_dotenv
 from google import genai
 from google.genai import types
+
+from call_function import available_functions, call_function
 from prompts import system_prompt
 
 
@@ -47,8 +48,18 @@ def generate_content(client, messages, verbose):
         print(response.text)
         return
 
+    results = []
     for function_call in response.function_calls:
-        print(f"Calling function: {function_call.name}({function_call.args})")
+        # print(f"Calling function: {function_call.name}({function_call.args})")
+        function_call_result = call_function(function_call)
+        if function_call_result.parts:
+            if function_call_result.parts[0].function_response:
+                results += function_call_result.parts[0]
+                print(f"-> {function_call_result.parts[0].function_response.response}")
+            else:
+                raise RuntimeError(f"Function {function_call.name} failed")
+        else:
+            raise RuntimeError(f"Function {function_call.name} failed")
 
 
 if __name__ == "__main__":
