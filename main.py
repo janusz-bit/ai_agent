@@ -4,6 +4,7 @@ import os
 from dotenv import load_dotenv
 from google import genai
 from google.genai import types
+from typing_extensions import List
 
 from call_function import available_functions, call_function
 from prompts import system_prompt
@@ -24,42 +25,51 @@ def main():
     messages = [types.Content(role="user", parts=[types.Part(text=args.user_prompt)])]
     if args.verbose:
         print(f"User prompt: {args.user_prompt}\n")
-
     generate_content(client, messages, args.verbose)
 
 
-def generate_content(client, messages, verbose):
-    response = client.models.generate_content(
-        model="gemini-2.5-flash",
-        contents=messages,
-        config=types.GenerateContentConfig(
-            tools=[available_functions], system_instruction=system_prompt
-        ),
-    )
-    if not response.usage_metadata:
-        raise RuntimeError("Gemini API response appears to be malformed")
+def generate_content(client, messages: List, verbose):
+    for _ in range(20):
+        response = client.models.generate_content(
+            model="gemini-2.5-flash",
+            contents=messages,
+            config=types.GenerateContentConfig(
+                tools=[available_functions], system_instruction=system_prompt
+            ),
+        )
+        for candidate in response.candidates:
+            messages.append(candidate.content)
 
-    if verbose:
-        print("Prompt tokens:", response.usage_metadata.prompt_token_count)
-        print("Response tokens:", response.usage_metadata.candidates_token_count)
+        if not response.usage_metadata:
+            raise RuntimeError("Gemini API response appears to be malformed")
 
-    if not response.function_calls:
-        print("Response:")
-        print(response.text)
-        return
+        if verbose:
+            print("Prompt tokens:", response.usage_metadata.prompt_token_count)
+            print("Response tokens:", response.usage_metadata.candidates_token_count)
 
-    results = []
-    for function_call in response.function_calls:
-        # print(f"Calling function: {function_call.name}({function_call.args})")
-        function_call_result = call_function(function_call)
-        if function_call_result.parts:
-            if function_call_result.parts[0].function_response:
-                results += function_call_result.parts[0]
-                print(f"-> {function_call_result.parts[0].function_response.response}")
+        if not response.function_calls:
+            print("Response:")
+            print(response.text)
+            return
+
+        function_responses = []
+        for function_call in response.function_calls:
+            # print(f"Calling function: {function_call.name}({function_call.args})")
+            function_call_result = call_function(function_call)
+            if function_call_result.parts:
+                if function_call_result.parts[0].function_response:
+                    if verbose:
+                        print(
+                            f"-> {function_call_result.parts[0].function_response.response}"
+                        )
+                else:
+                    raise RuntimeError(f"Function {function_call.name} failed")
             else:
                 raise RuntimeError(f"Function {function_call.name} failed")
-        else:
-            raise RuntimeError(f"Function {function_call.name} failed")
+            function_responses.append(function_call_result.parts[0])
+        messages.append(types.Content(role="user", parts=function_responses))
+    print("Maximum number of iterations is reached")
+    exit(1)
 
 
 if __name__ == "__main__":
